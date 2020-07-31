@@ -3,6 +3,7 @@ package com.daskks.ffmpeg;
 import androidx.appcompat.app.AppCompatActivity;
 
 import android.os.Bundle;
+import android.util.Log;
 import android.view.View;
 
 import com.daskks.ffmpeg.jniproxy.FFmpegJni;
@@ -28,7 +29,9 @@ public class MainActivity extends AppCompatActivity {
         findViewById(R.id.tv_decode).setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
-
+                Log.i("ROM_DEBUG", "devode clicked.");
+                String input = "/sdcard/test.mp4";
+                video_decode(input, "output");
             }
         });
     }
