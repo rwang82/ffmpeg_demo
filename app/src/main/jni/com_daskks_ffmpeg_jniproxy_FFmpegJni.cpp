@@ -30,7 +30,7 @@ JNIEXPORT void JNICALL Java_com_daskks_ffmpeg_jniproxy_FFmpegJni_onUnInit
 JNIEXPORT void JNICALL
 Java_com_daskks_ffmpeg_MainActivity_video_1decode(JNIEnv *env, jobject instance, jstring input_,
                                                   jstring output_) {
-    LOGD("asdlfjalsd;fa");
+    LOGD("ROM_DEBUG;fa");
     const char *input = env->GetStringUTFChars(input_, 0);
     const char *output = env->GetStringUTFChars(output_, 0);
 
@@ -51,18 +51,35 @@ Java_com_daskks_ffmpeg_MainActivity_video_1decode(JNIEnv *env, jobject instance,
     uint8_t *buffer;
 
     // 打开文件.
+    pFmtCtx = avformat_alloc_context();
+    if (!pFmtCtx) {
+        LOGE("[failed] avformat_alloc_context NULL");
+        return;
+    }
+
     if (avformat_open_input(&pFmtCtx, input, NULL, NULL) != 0) {
+        LOGE("[failed] avformat_open_input");
         return;
     }
     //
     if (avformat_find_stream_info(pFmtCtx, NULL) < 0) {
+        LOGE("[failed] avformat_find_stream_info");
         return;
     }
     //
     av_dump_format(pFmtCtx, -1, input, 0);
     //
+    AVCodecParameters *pCodecParameters =  NULL;
     videoStream = -1;
     for (i = 0; i<pFmtCtx->nb_streams; i++) {
+        AVCodecParameters *pLocalCodecParameters =  NULL;
+        pLocalCodecParameters = pFmtCtx->streams[i]->codecpar;
+
+        LOGI("AVStream->time_base before open coded %d/%d", pFmtCtx->streams[i]->time_base.num, pFmtCtx->streams[i]->time_base.den);
+        LOGI("AVStream->r_frame_rate before open coded %d/%d", pFmtCtx->streams[i]->r_frame_rate.num, pFmtCtx->streams[i]->r_frame_rate.den);
+        LOGI("AVStream->start_time %" PRId64, pFmtCtx->streams[i]->start_time);
+        LOGI("AVStream->duration %" PRId64, pFmtCtx->streams[i]->duration);
+
         if (pFmtCtx->streams[i]->codecpar->codec_type == AVMEDIA_TYPE_VIDEO) {
             videoStream = i;
             break;

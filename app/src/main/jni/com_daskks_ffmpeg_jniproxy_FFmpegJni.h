@@ -16,7 +16,7 @@ JNIEXPORT void JNICALL Java_com_daskks_ffmpeg_jniproxy_FFmpegJni_onInit
         (JNIEnv *, jclass, jstring, jstring);
 
 /*
- * Class:     com_daskks_ffmpeg_jniproxy_FFmpegJni
+ * Class:     com_daskks_ffmpeg_jniproxvideo_decodey_FFmpegJni
  * Method:    onUnInit
  * Signature: ()V
  */
