@@ -4,6 +4,8 @@ extern "C"{
 #include <libavutil/imgutils.h>
 #include <libavutil/frame.h>
 }
+
+#include <libswscale/swscale.h>
 #include "com_daskks_ffmpeg_jniproxy_FFmpegJni.h"
 #include "NLog.h"
 
@@ -26,6 +28,8 @@ JNIEXPORT void JNICALL Java_com_daskks_ffmpeg_jniproxy_FFmpegJni_onUnInit
   (JNIEnv *, jclass) {
   }
 
+static int decode_packet(AVPacket *pPacket, AVCodecContext *pCodecContext, AVFrame *pFrame);
+static void save_gray_frame(unsigned char *buf, int wrap, int xsize, int ysize, char *filename);
 
 JNIEXPORT void JNICALL
 Java_com_daskks_ffmpeg_MainActivity_video_1decode(JNIEnv *env, jobject instance, jstring input_,
@@ -45,10 +49,11 @@ Java_com_daskks_ffmpeg_MainActivity_video_1decode(JNIEnv *env, jobject instance,
     AVCodecID codecId = AV_CODEC_ID_NONE;
     AVFrame *pFrame = NULL;
     AVFrame *pFrameRGB = NULL;
-    AVPacket packet;
+    AVPacket* pPacket = NULL;
     int frameFinished;
     int numBytes;
     uint8_t *buffer;
+    int resp = 0;
 
     // 打开文件.
     pFmtCtx = avformat_alloc_context();
@@ -57,10 +62,12 @@ Java_com_daskks_ffmpeg_MainActivity_video_1decode(JNIEnv *env, jobject instance,
         return;
     }
 
-    if (avformat_open_input(&pFmtCtx, input, NULL, NULL) != 0) {
-        LOGE("[failed] avformat_open_input");
+    resp = avformat_open_input(&pFmtCtx, input, NULL, NULL);
+    if (resp != 0) {
+        LOGE("[failed][%d] avformat_open_input", resp);
         return;
     }
+    LOGI("long_name :%s, duration :%lld us", pFmtCtx->iformat->long_name, pFmtCtx->duration);
     //
     if (avformat_find_stream_info(pFmtCtx, NULL) < 0) {
         LOGE("[failed] avformat_find_stream_info");
@@ -75,6 +82,7 @@ Java_com_daskks_ffmpeg_MainActivity_video_1decode(JNIEnv *env, jobject instance,
         AVCodecParameters *pLocalCodecParameters =  NULL;
         pLocalCodecParameters = pFmtCtx->streams[i]->codecpar;
 
+        LOGI("codecpar type:%d", (int)pLocalCodecParameters->codec_type);
         LOGI("AVStream->time_base before open coded %d/%d", pFmtCtx->streams[i]->time_base.num, pFmtCtx->streams[i]->time_base.den);
         LOGI("AVStream->r_frame_rate before open coded %d/%d", pFmtCtx->streams[i]->r_frame_rate.num, pFmtCtx->streams[i]->r_frame_rate.den);
         LOGI("AVStream->start_time %" PRId64, pFmtCtx->streams[i]->start_time);
@@ -86,6 +94,7 @@ Java_com_daskks_ffmpeg_MainActivity_video_1decode(JNIEnv *env, jobject instance,
         }
     }
     if (videoStream == -1) {
+        LOGE("no video stream. so exit.");
         return;
     }
     param4AVCodec = pFmtCtx->streams[videoStream]->codecpar;
@@ -97,10 +106,21 @@ Java_com_daskks_ffmpeg_MainActivity_video_1decode(JNIEnv *env, jobject instance,
     if (pCodec == NULL) {
         return;
     }
+    if (pCodec->long_name != NULL) {
+        LOGI("codec:%s, id:%d", pCodec->long_name, (int)pCodec->id);
+    } else {
+        LOGI("pCodec->long_name == NULL");
+    }
     pCodecCtx = avcodec_alloc_context3(pCodec);
     if (pCodecCtx == NULL) {
         return;
     }
+    // 新版本的 FFmpeg 需要这个函数把音视频流信息拷贝到新的ACCodecContext结构体中.
+    if ( avcodec_parameters_to_context(pCodecCtx, param4AVCodec) < 0) {
+        LOGE("[failed] avcodec_parameters_to_context");
+        return;
+    }
+
     if (avcodec_open2(pCodecCtx, pCodec, NULL)) {
         return;
     }
@@ -121,33 +141,31 @@ Java_com_daskks_ffmpeg_MainActivity_video_1decode(JNIEnv *env, jobject instance,
     if (nErrCode < 0) {
         LOGE("av_image_fill_arrays failed. errcode:%d", nErrCode);
     }
+
+    // https://ffmpeg.org/doxygen/trunk/structAVPacket.html
+    pPacket = av_packet_alloc();
+    if (!pPacket) {
+        LOGI("failed to allocated memory for AVPacket");
+        return;
+    }
+    int response = 0;
+    int how_many_packets_to_process = 8;
     //获取图像
-//    i = 0;
-//    while( av_read_frame(pFmtCtx, &packet) >= 0 ) {
-//        if( packet.stream_index == videoStream ) {
-//            avcodec_decode_video2(pCodecCtx, pFrame, &frameFinished, &packet);
-//
-//            if( frameFinished ) {
-//                struct SwsContext *img_convert_ctx = NULL;
-//                img_convert_ctx =
-//                        sws_getCachedContext(img_convert_ctx, pCodecCtx->width,
-//                                             pCodecCtx->height, pCodecCtx->pix_fmt,
-//                                             pCodecCtx->width, pCodecCtx->height,
-//                                             PIX_FMT_RGB24, SWS_BICUBIC,
-//                                             NULL, NULL, NULL);
-//                if( !img_convert_ctx ) {
-//                    fprintf(stderr, "Cannot initialize sws conversion context\n");
-//                    exit(1);
-//                }
-//                sws_scale(img_convert_ctx, (const uint8_t* const*)pFrame->data,
-//                          pFrame->linesize, 0, pCodecCtx->height, pFrameRGB->data,
-//                          pFrameRGB->linesize);
-//                if( i++ < 50 )
-//                    SaveFrame(pFrameRGB, pCodecCtx->width, pCodecCtx->height, i);
-//            }
-//        }
-//        av_free_packet(&packet);
-//    }
+    i = 0;
+    while( av_read_frame(pFmtCtx, pPacket) >= 0 ) {
+        if( pPacket->stream_index == videoStream ) {
+            LOGI("start to decode... %" PRId64, pPacket->pts);
+
+            response = decode_packet(pPacket, pCodecCtx, pFrame);
+            if (response < 0)
+                break;
+            if (--how_many_packets_to_process <= 0) break;
+
+            // https://ffmpeg.org/doxygen/trunk/group__lavc__packet.html#ga63d5a489b419bd5d45cfd09091cbcbc2
+            av_packet_unref(pPacket);
+        }
+    }
+    av_packet_free(&pPacket);
 
     av_free(buffer);
     av_frame_free(&pFrameRGB);
@@ -159,23 +177,77 @@ Java_com_daskks_ffmpeg_MainActivity_video_1decode(JNIEnv *env, jobject instance,
     env->ReleaseStringUTFChars(input_, input);
     env->ReleaseStringUTFChars(output_, output);
 }
-static void SaveFrame(AVFrame *pFrame, int width, int height, int iFrame)
+
+
+static int decode_packet(AVPacket *pPacket, AVCodecContext *pCodecContext, AVFrame *pFrame)
 {
-    FILE *pFile;
-    char szFilename[32];
-    int y;
+    // Supply raw packet data as input to a decoder
+    // https://ffmpeg.org/doxygen/trunk/group__lavc__decoding.html#ga58bc4bf1e0ac59e27362597e467efff3
+    int response = avcodec_send_packet(pCodecContext, pPacket);
 
-    sprintf(szFilename, "frame%d.ppm", iFrame);
-    pFile = fopen(szFilename, "wb");
-    if( !pFile )
-        return;
-    fprintf(pFile, "P6\n%d %d\n255\n", width, height);
+    if (response < 0) {
+        LOGE("Error while sending a packet to the decoder: %s", av_err2str(response));
+        return response;
+    }
 
-    for( y = 0; y < height; y++ )
-        fwrite(pFrame->data[0] + y * pFrame->linesize[0], 1, width * 3, pFile);
+    while (response >= 0)
+    {
+        // Return decoded output data (into a frame) from a decoder
+        // https://ffmpeg.org/doxygen/trunk/group__lavc__decoding.html#ga11e6542c4e66d3028668788a1a74217c
+        response = avcodec_receive_frame(pCodecContext, pFrame);
+        if (response == AVERROR(EAGAIN) || response == AVERROR_EOF) {
+            break;
+        } else if (response < 0) {
+            LOGE("Error while receiving a frame from the decoder: %s", av_err2str(response));
+            return response;
+        }
 
-    fclose(pFile);
+        if (response >= 0) {
+            LOGI(
+                    "Frame %d (type=%c, size=%d bytes, format=%d) pts %d key_frame %d [DTS %d]",
+                    pCodecContext->frame_number,
+                    av_get_picture_type_char(pFrame->pict_type),
+                    pFrame->pkt_size,
+                    pFrame->format,
+                    pFrame->pts,
+                    pFrame->key_frame,
+                    pFrame->coded_picture_number
+            );
+
+            char frame_filename[1024];
+            snprintf(frame_filename, sizeof(frame_filename), "/sdcard/%s-%d.pgm", "frame", pCodecContext->frame_number);
+            // Check if the frame is a planar YUV 4:2:0, 12bpp
+            // That is the format of the provided .mp4 file
+            // RGB formats will definitely not give a gray image
+            // Other YUV image may do so, but untested, so give a warning
+            if (pFrame->format != AV_PIX_FMT_YUV420P)
+            {
+                LOGE("Warning: the generated file may not be a grayscale image, but could e.g. be just the R component if the video format is RGB");
+            }
+            // save a grayscale frame into a .pgm file
+            save_gray_frame(pFrame->data[0], pFrame->linesize[0], pFrame->width, pFrame->height, frame_filename);
+        }
+    }
+    return 0;
 }
 
+static void save_gray_frame(unsigned char *buf, int wrap, int xsize, int ysize, char *filename)
+{
+    FILE *f;
+    int i;
+    f = fopen(filename,"w");
+    if (f == NULL) {
+        LOGE("fopen %s failed.", filename);
+        return;
+    }
+    // writing the minimal required header for a pgm file format
+    // portable graymap format -> https://en.wikipedia.org/wiki/Netpbm_format#PGM_example
+    fprintf(f, "P5\n%d %d\n%d\n", xsize, ysize, 255);
+
+    // writing line by line
+    for (i = 0; i < ysize; i++)
+        fwrite(buf + i * wrap, 1, xsize, f);
+    fclose(f);
+}
 
 
