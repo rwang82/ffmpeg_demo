@@ -3,10 +3,12 @@ package com.daskks.ffmpeg;
 import androidx.appcompat.app.AppCompatActivity;
 
 import android.Manifest;
+import android.content.Intent;
 import android.os.Bundle;
 import android.util.Log;
 import android.view.View;
 
+import com.daskks.ffmpeg.activitys.Activity4CutTest;
 import com.daskks.ffmpeg.jniproxy.BuildCompat;
 import com.daskks.ffmpeg.jniproxy.FFmpegJni;
 import com.tbruyelle.rxpermissions.RxPermissions;
@@ -42,6 +44,14 @@ public class MainActivity extends AppCompatActivity {
                     return;
                 }
                 video_decode(input, "output");
+            }
+        });
+
+        findViewById(R.id.tv_cut).setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                Log.i("ROM_DEBUG", "cut clicked.");
+                MainActivity.this.startActivity(new Intent(MainActivity.this, Activity4CutTest.class));
             }
         });
 
